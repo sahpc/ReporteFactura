@@ -1,0 +1,161 @@
+﻿@{
+    ViewData["Title"] = "Registrar Factura";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+<h2 class="mb-4">Registrar Factura</h2>
+
+<form id="facturaForm">
+    <div class="mb-3">
+        <label for="clienteId" class="form-label">ID Cliente:</label>
+        <input type="number" id="clienteId" class="form-control" required>
+    </div>
+
+    <div class="mb-3">
+        <label for="numeroFactura" class="form-label">Número de Factura:</label>
+        <input type="number" id="numeroFactura" class="form-control" required>
+    </div>
+
+    <h4>Productos</h4>
+    <table class="table" id="productosTable">
+        <tr>
+            <th>Nombre Producto</th>
+            <th>Cantidad</th>
+            <th>Precio Unitario</th>
+        </tr>
+    </table>
+
+    <button type="button" onclick="agregarProducto()" class="btn btn-secondary me-2">Agregar Producto</button>
+    <button type="button" onclick="guardarFactura()" class="btn btn-success me-2">Guardar Factura</button>
+    <button type="button" onclick="generarReporteFacturaDesdeFormulario()" class="btn btn-primary">Descargar Reporte PDF</button>
+</form>
+
+<!-- Scripts jsPDF y AutoTable -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+
+<script>
+    function agregarProducto() {
+        const table = document.getElementById("productosTable");
+        const row = table.insertRow();
+
+        row.innerHTML = `
+            <td><input type="text" class="form-control nombreProducto" required></td>
+            <td><input type="number" class="form-control cantidad" min="1" value="1" required></td>
+            <td><input type="number" class="form-control precioUnitario" step="0.01" min="0.01" value="0.00" required></td>
+        `;
+    }
+
+    function guardarFactura() {
+        const clienteId = document.getElementById("clienteId").value;
+        const numeroFactura = document.getElementById("numeroFactura").value;
+
+        if (!clienteId || !numeroFactura) {
+            alert("Debe ingresar el ID del cliente y el número de factura.");
+            return;
+        }
+
+        let productos = [];
+        const filas = document.querySelectorAll("#productosTable tr");
+
+        if (filas.length <= 1) {
+            alert("⚠️ Debe agregar al menos un producto a la factura.");
+            return;
+        }
+
+        filas.forEach((row, index) => {
+            if (index === 0) return;
+
+            const nombre = row.querySelector(".nombreProducto")?.value;
+            const cantidad = parseFloat(row.querySelector(".cantidad")?.value);
+            const precio = parseFloat(row.querySelector(".precioUnitario")?.value);
+
+            if (nombre && cantidad > 0 && precio > 0) {
+                productos.push({ nombreProducto: nombre, cantidad, precioUnitario: precio });
+            }
+        });
+
+        if (productos.length === 0) {
+            alert("⚠️ Debe llenar correctamente al menos un producto.");
+            return;
+        }
+
+        fetch('/DetalleFactura/GuardarFactura', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cliente: { id: clienteId },
+                numeroFactura: parseInt(numeroFactura),
+                productos
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(data.message);
+        })
+        .catch(error => {
+            console.error("Error:", error);
+            alert("❌ Ocurrió un error al guardar la factura.");
+        });
+    }
+
+    async function generarReporteFacturaDesdeFormulario() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        const clienteId = document.getElementById("clienteId").value;
+        const numeroFactura = document.getElementById("numeroFactura").value;
+        const fechaActual = new Date().toLocaleDateString();
+
+        const productos = [];
+        let subtotal = 0;
+
+        document.querySelectorAll("#productosTable tr").forEach((row, index) => {
+            if (index === 0) return;
+
+            const nombre = row.querySelector(".nombreProducto")?.value;
+            const cantidad = parseFloat(row.querySelector(".cantidad")?.value);
+            const precio = parseFloat(row.querySelector(".precioUnitario")?.value);
+            const total = cantidad * precio;
+
+            subtotal += total;
+
+            productos.push([
+                nombre,
+                cantidad,
+                `$${precio.toFixed(2)}`,
+                `$${total.toFixed(2)}`
+            ]);
+        });
+
+        if (productos.length === 0) {
+            alert("⚠️ Debe agregar al menos un producto válido antes de generar el PDF.");
+            return;
+        }
+
+        const iva = subtotal * 0.15;
+        const totalPagar = subtotal + iva;
+
+        doc.setFontSize(18);
+        doc.text("Factura de Venta", 75, 15);
+
+        doc.setFontSize(12);
+        doc.text(`Fecha: ${fechaActual}`, 10, 30);
+        doc.text(`Número de Factura: ${numeroFactura}`, 10, 36);
+        doc.text(`ID Cliente: ${clienteId}`, 10, 42);
+
+        doc.autoTable({
+            startY: 50,
+            head: [["Producto", "Cantidad", "Precio Unitario", "Subtotal"]],
+            body: productos
+        });
+
+        const finalY = doc.lastAutoTable.finalY + 10;
+
+        doc.text(`Subtotal: $${subtotal.toFixed(2)}`, 150, finalY);
+        doc.text(`IVA (15%): $${iva.toFixed(2)}`, 150, finalY + 6);
+        doc.text(`Total a Pagar: $${totalPagar.toFixed(2)}`, 150, finalY + 12);
+
+        doc.save(`Factura_${numeroFactura}.pdf`);
+    }
+</script>
